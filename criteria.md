@@ -42,63 +42,48 @@ Two things worth knowing before you pick numbers:
   a **miss**.
 
 ---
-## 1.
+## 1. False Positive Rate on Human Writing
 
-<!-- Your criterion. It must name a number. -->
-
-
+Of 10 distinct samples of verified human writing, at most 1 (<= 10%) is classified with the guess `"ai"`.
 
 **Why this target:**
-
-
+Falsely accusing a real writer of using AI destroys user trust and inflicts unfair disciplinary or reputational damage. Allowing at most 1 false accusation in 10 ensures the threshold errs on the side of caution, pushing questionable human writing into `"unsure"` or `"human"` rather than an outright `"ai"` verdict.
 
 ---
 
-## 2.
+## 2. Score Separation Between Clear Human and Clear AI Text
 
-<!-- Your criterion. -->
-
-
+The mean `combined_score` of 5 clearly-AI text samples is at least 0.40 points higher than the mean `combined_score` of 5 clearly-human text samples (on the 0.0 to 1.0 scale).
 
 **Why this target:**
-
-
+If the score gap between obvious human writing and obvious AI output is narrower than 0.40, the system's signals lack sufficient discriminative power. Demanding a 0.40 separation requires clear divergence between AI and human distributions, leaving room for an `"unsure"` buffer zone without constant boundary overlap.
 
 ---
 
-## 3.
+## 3. Label Reachability and Coverage
 
-<!-- Your criterion. -->
-
-
+Across a test suite of diverse inputs (clear human, borderline, and clear AI), each of the three discrete guesses (`"human"`, `"unsure"`, and `"ai"`) appears at least once in the response.
 
 **Why this target:**
-
-
+All three labels must be active in production. If `"unsure"` is never triggered, the service has collapsed into an aggressive binary classifier that ignores signal disagreement; if either boundary label is unreachable, the scoring thresholds are miscalibrated.
 
 ---
 
-## 4.
+## 4. Graceful Rejection of Malformed Input
 
-<!-- Your criterion. -->
-
-
+100% (4 of 4) of malformed requests (empty text string `""`, missing `"text"` field, `null` text value, and an oversized text payload > 50,000 words) return an HTTP 4xx client error status code rather than causing a 500 server crash or returning a false 200 OK.
 
 **Why this target:**
-
-
+Uncaught exceptions crash service threads and fail silently without leaving an auditable trace. A robust API must reject invalid payloads at the route perimeter with clean 400-level error messages so callers know what failed.
 
 ---
 
-## 5.
+## 5. Appeal Path Integrity and State Transition
 
-<!-- Your criterion. -->
-
-
+100% (5 of 5) of submitted appeals to `POST /appeal` with an existing `content_id` successfully return HTTP 200 and record an `under_review` status entry in `audit.log`.
 
 **Why this target:**
-
-
+The appeal system is the sole safeguard protecting wrongfully accused writers. If an appeal fails to log or fails to transition the submission's status to `under_review`, the writer is effectively disenfranchised and the automated verdict stands without remedy.
 
 ---
 

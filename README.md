@@ -39,7 +39,15 @@
 <!-- The path a submission takes, from arriving to the label a reader sees.
      Six or seven steps — this is the trace you wrote in Milestone 1. -->
 
+A piece of text submitted to Provenance Guard passes through a seven-step pipeline:
 
+1. **Ingestion & Validation (`app.py::submit`):** The service receives a `POST` request with JSON containing `text` and `creator_id`. It validates that the payload is well-formed, non-empty, and within the 50,000-word limit, rejecting malformed requests with clean 400-level error codes.
+2. **Provenance Assignment (`app.py::submit`):** The service generates an immutable, unique identifier (`content_id` via UUID4). This links the submission to its author and serves as the tracking handle for auditing and future appeals.
+3. **Semantic Perplexity Signal (`detector.py::model_signal`):** The text is passed to a local causal language model (GPT-2). The model computes token perplexity to measure how statistically predictable the phrasing is, mapping the result to a normalized 0.0–1.0 score (`model_score`, where higher means more AI-like).
+4. **Structural Stylometry Signal (`stylometry.py::style_signal`):** The text is analyzed mechanically without semantic comprehension. It measures sentence length variation (burstiness / coefficient of variation), vocabulary diversity (type-token ratio), and expressive punctuation density, combining them into a normalized 0.0–1.0 score (`style_score`, where higher means more AI-like).
+5. **Signal Combination (`scoring.py::combine_signals`):** The combining rule applies a 60/40 weighted blend to merge `model_score` and `style_score` into a single composite `combined_score` (0.0 to 1.0).
+6. **Label Classification & Confidence (`scoring.py::score_to_label`):** The composite score is compared against calibrated thresholds (`HUMAN_THRESHOLD = 0.35`, `AI_THRESHOLD = 0.70`) to produce a categorical `guess` (`human`, `unsure`, or `ai`), a confidence percentage, and a respectful reader-facing explanation (`label`).
+7. **Audit Logging & Response Dispatch (`audit.py::log_decision` & `app.py`):** The complete decision (timestamp, UUID, author, all three scores, and status `"decided"`) is appended as an immutable JSON line to `logs/audit.jsonl`, and the full JSON payload is returned to the client.
 
 ---
 
@@ -54,18 +62,24 @@
 ### Signal one — the model signal
 
 **What it measures:**
+Token perplexity against a local causal language model (GPT-2), quantifying how statistically predictable each subsequent token is in context.
 
 **Why that might differ between human and AI writing:**
+Large language models generate text by repeatedly sampling statistically probable next tokens, producing remarkably smooth, expected transition sequences with low perplexity. Human writers wander—introducing abrupt tonal shifts, regional slang, uncommon metaphors, and creative vocabulary that repeatedly surprise the language model.
 
 **What it can't see:**
+It cannot distinguish **authorship** from **linguistic simplicity**. Authors writing in plain, direct English—such as non-native (ESL) speakers using safe, familiar vocabulary, younger students, or authors writing technical/encyclopedic documentation—produce highly predictable text that scores with high AI likelihood. Conversely, AI text specifically prompted to use archaic, baroque 19th-century prose spikes in perplexity and fools this detector into reporting "human."
 
 ### Signal two — the style signal
 
 **What it measures:**
+The physical, surface geometry of the text: sentence length variation (coefficient of variation: $\sigma / \mu$), vocabulary diversity (type-token ratio), and expressive punctuation density (commas, semicolons, dashes, colons, exclamations).
 
 **Why that might differ between human and AI writing:**
+AI-generated text naturally clusters around uniform, medium-length sentences (~14–18 words each) that march in rhythmic step with safe vocabulary repetition. Human writing is naturally bursty and irregular—frequently pairing a short three-word punchy sentence with a sprawling, forty-word clause loaded with expressive punctuation.
 
 **What it can't see:**
+It cannot comprehend meaning or context. Because it evaluates purely typographical geometry, trivial surface edits easily manipulate it: inserting intentional typos (which artificially inflates vocabulary variety), breaking long sentences with random punctuation, or injecting arbitrary dashes fools the stylometry engine into reporting high human burstiness on entirely synthetic text.
 
 ### The combining rule
 
@@ -132,11 +146,19 @@ I worded the "unsure" label to place the burden of uncertainty squarely on the t
 ```bash
 $ curl -X POST http://127.0.0.1:5000/submit \
   -H "Content-Type: application/json" \
-  -d '{"text": "...", "creator_id": "..."}'
+  -d '{"text": "It is important to remember that education plays a vital role in personal development. In addition, schools provide students with the necessary tools to succeed in the future. Furthermore, teachers help students build critical thinking skills and foster a love for learning. Moreover, education enables individuals to explore new opportunities and achieve their personal goals. Therefore, investing in quality education is essential for the progress of modern society.", "creator_id": "ai_test"}'
 ```
 
 ```json
-
+{
+  "combined_score": 0.7816,
+  "confidence": 0.7816,
+  "content_id": "728968f5-12f3-4b07-814c-5defc3b06801",
+  "guess": "ai",
+  "label": "We think this was probably generated by an AI, based on highly uniform sentence structures and predictable phrasing.",
+  "model_score": 0.876,
+  "style_score": 0.6401
+}
 ```
 
 **An appeal**
@@ -144,11 +166,16 @@ $ curl -X POST http://127.0.0.1:5000/submit \
 ```bash
 $ curl -X POST http://127.0.0.1:5000/appeal \
   -H "Content-Type: application/json" \
-  -d '{"content_id": "...", "reasoning": "..."}'
+  -d '{"content_id": "728968f5-12f3-4b07-814c-5defc3b06801", "reasoning": "I wrote this paragraph for an education essay rubric following strict structural guidelines. Please have a human reviewer inspect it."}'
 ```
 
 ```json
-
+{
+  "content_id": "728968f5-12f3-4b07-814c-5defc3b06801",
+  "message": "Your appeal has been received. Your submission status is now under review.",
+  "ok": true,
+  "status": "under_review"
+}
 ```
 
 **What the log shows afterwards**
@@ -158,7 +185,41 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
 ```
 
 ```json
-
+{
+  "count": 3,
+  "entries": [
+    {
+      "combined_score": 0.6644,
+      "content_id": "822c1ad6-02b0-4568-b117-9c51852bb23b",
+      "creator_id": "wiki_test",
+      "guess": "unsure",
+      "label": "We cannot reliably tell whether this was written by a person or an AI; it shows a mix of patterns that could come from either.",
+      "model_score": 0.7289,
+      "status": "decided",
+      "style_score": 0.5677,
+      "timestamp": "2026-10-31T23:32:25+00:00"
+    },
+    {
+      "combined_score": 0.7816,
+      "content_id": "728968f5-12f3-4b07-814c-5defc3b06801",
+      "creator_id": "ai_test",
+      "guess": "ai",
+      "label": "We think this was probably generated by an AI, based on highly uniform sentence structures and predictable phrasing.",
+      "model_score": 0.876,
+      "status": "decided",
+      "style_score": 0.6401,
+      "timestamp": "2026-10-31T23:32:35+00:00"
+    },
+    {
+      "content_id": "728968f5-12f3-4b07-814c-5defc3b06801",
+      "creator_id": "ai_test",
+      "event": "appeal",
+      "reasoning": "I wrote this paragraph for an education essay rubric following strict structural guidelines. Please have a human reviewer inspect it.",
+      "status": "under_review",
+      "timestamp": "2026-10-31T23:35:10+00:00"
+    }
+  ]
+}
 ```
 
 ---
@@ -167,15 +228,15 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
 
 **Moment 1**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* Assistance formulating the acceptance criteria in `criteria.md` in a way that would be concrete and measurable.
+- *What came back:* Specific mathematical definitions and statistical targets for false positives, separation spread, and malformed input handling.
+- *What I changed:* Tweaked the target numbers (such as setting the required score spread to 0.40) and rewrote the wording to make each criterion less intensely technical and more plainly observable.
 
 **Moment 2**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* Generating candidate text samples to test the AI detection boundary.
+- *What came back:* Standard corporate/academic boilerplate about education with uniform sentence pacing and textbook transition phrases.
+- *What I changed:* Kept the base text as the pure AI test case, and then manually created the "lightly edited AI" test sample by tweaking sentences.
 
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 

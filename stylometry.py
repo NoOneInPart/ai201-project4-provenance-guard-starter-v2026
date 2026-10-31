@@ -64,38 +64,53 @@ def sentence_length_spread(text: str) -> float:
     `stdev` raises on fewer than two values. Decide what that should return
     before the attack set decides for you.
     """
-    # TODO: replace this
-    return 0.0
+    sents = sentences(text)
+    if len(sents) < 2:
+        return 0.0
+
+    lengths = [len(words(s)) for s in sents if len(words(s)) > 0]
+    if len(lengths) < 2:
+        return 0.0
+
+    mean_len = statistics.mean(lengths)
+    if mean_len == 0:
+        return 0.0
+
+    stdev_len = statistics.stdev(lengths)
+    return round(stdev_len / mean_len, 4)
 
 
 def type_token_ratio(text: str) -> float:
     """
-    Unique words over total words. ← TODO
+    Unique words over total words (lexical diversity).
 
     Returns:
-        A float between 0 and 1. Higher means more varied vocabulary.
-
-    Worth knowing before you rely on it: this measure falls as text gets
-    longer, because common words repeat. Two texts of different lengths aren't
-    directly comparable on it, and if your test inputs vary a lot in length,
-    that alone can look like a signal.
+        A float between 0.0 and 1.0. Higher means richer vocabulary with
+        less repetition. Returns 0.0 for empty texts.
     """
-    # TODO: replace this
-    return 0.0
+    token_list = words(text)
+    if not token_list:
+        return 0.0
+    return round(len(set(token_list)) / len(token_list), 4)
 
 
 def punctuation_density(text: str) -> float:
     """
-    How much punctuation, relative to length. ← TODO
+    Density of expressive punctuation marks per word.
+
+    Counts expressive punctuation (commas, semicolons, colons, dashes,
+    question marks, and exclamation marks) relative to total word count.
 
     Returns:
-        A float. Whether you count all punctuation or only some kinds — commas,
-        semicolons, dashes — is a real choice. Semicolons and em dashes are
-        more interesting than full stops, because they vary more between
-        writers.
+        A float. Higher density reflects varied, expressive punctuation
+        common in human writing. Returns 0.0 for empty texts.
     """
-    # TODO: replace this
-    return 0.0
+    token_list = words(text)
+    if not token_list:
+        return 0.0
+
+    marks = re.findall(r"[,;:\-—!?]", text)
+    return round(len(marks) / len(token_list), 4)
 
 
 # ── Combining them ───────────────────────────────────────────────────────────
@@ -122,8 +137,27 @@ def style_signal(text: str) -> float:
     you trust it. Plain and ordinary, not formal: formal prose reads as *human*
     to signal one, and it is plain writing that gets accused.
     """
-    # TODO: replace this
-    return 0.5
+    token_list = words(text)
+    if not token_list:
+        return 0.5
+
+    cv = sentence_length_spread(text)
+    ttr = type_token_ratio(text)
+    punct = punctuation_density(text)
+
+    # Invert and rescale each measure so higher = more AI-like
+    # Sentence spread: AI typically clusters at 0.15-0.30; humans often exceed 0.60
+    spread_ai = 1.0 - min(max((cv - 0.15) / (0.65 - 0.15), 0.0), 1.0)
+
+    # Type-token ratio: Lower diversity -> more AI-like
+    ttr_ai = 1.0 - min(max((ttr - 0.45) / (0.80 - 0.45), 0.0), 1.0)
+
+    # Punctuation density: Lower expressive punctuation -> more AI-like
+    punct_ai = 1.0 - min(max((punct - 0.02) / (0.12 - 0.02), 0.0), 1.0)
+
+    # Weighted composite (50% sentence spread, 30% vocab variety, 20% punctuation)
+    score = (0.50 * spread_ai) + (0.30 * ttr_ai) + (0.20 * punct_ai)
+    return round(min(max(score, 0.0), 1.0), 4)
 
 
 if __name__ == "__main__":
@@ -139,4 +173,4 @@ if __name__ == "__main__":
     print(f"type_token_ratio         {type_token_ratio(text)}")
     print(f"punctuation_density      {punctuation_density(text)}")
     print(f"style_signal             {style_signal(text)}   (higher = more likely AI)")
-    print("\nAll zeros? These are stubs — Milestone 4 is where you build them.")
+

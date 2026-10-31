@@ -72,9 +72,11 @@
 <!-- Write the rule in words, then give the numbers. What happens when the two
      signals disagree? -->
 
-**The rule:**
+**The rule:** A weighted linear combination of the model perplexity signal and the structural style signal. When the two signals disagree, the combined score lands toward the center ("unsure"). We weight the model signal slightly higher because GPT-2 measures token probability distributions across whole contexts, whereas surface stylometry heuristics can be disproportionately swayed by short texts or punctuation quirks.
 
 **The numbers:**
+- `WEIGHT_MODEL_SIGNAL = 0.6`
+- `WEIGHT_STYLE_SIGNAL = 0.4`
 
 **Where it lives:** `scoring.py::combine_signals`
 
@@ -82,6 +84,11 @@
      somewhere else, say where. -->
 
 **A case where my two signals split, and what my rule does with it:**
+
+- **Input:** `"The quick brown fox jumps over the lazy dog"`
+- **Model signal (`detector.py`):** `0.0697` (confidently human — the distinct pangram is surprising to GPT-2).
+- **Style signal (`stylometry.py`):** `0.7000` (confidently AI — because it is a single isolated sentence with zero expressive punctuation, sentence length spread is 0.0 and punctuation density is 0.0, which maxes out the AI-penalty components despite a high type-token ratio).
+- **What the rule does with it:** The rule computes $0.6 \times 0.0697 + 0.4 \times 0.7000 = 0.3218$. Because the model signal carries 60% weight, it pulls the combined score down away from the high style score, landing it safely in the human/low-borderline zone ($0.3218 < 0.35$) and preventing a false AI accusation.
 
 
 

@@ -228,10 +228,9 @@ def submit():
     style_score = stylometry.style_signal(text)
     combined_score = scoring.combine_signals(model_score, style_score)
 
-    # Placeholders for Milestone 4 before labels are finalized in Milestone 5
-    guess = "unsure"
-    confidence = 0.5
-    label = "Preliminary evaluation (both signals combined)."
+    # Determine guess, human-readable label, and confidence
+    guess, label = scoring.score_to_label(combined_score)
+    confidence = scoring.calculate_confidence(combined_score, guess)
 
     # Log the decision to the immutable audit ledger
     audit.log_decision(
@@ -276,14 +275,39 @@ def appeal():
     to the person on the other end. It's the only thing standing between a
     wrong accusation and nothing at all.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "bad_request", "message": "Expected JSON object."}), 400
 
-    # TODO: delete this and build the route.
+    content_id = payload.get("content_id")
+    reasoning = payload.get("reasoning")
+
+    if not isinstance(content_id, str) or not content_id.strip():
+        return jsonify({"error": "bad_request", "message": "Field 'content_id' must be a non-empty string."}), 400
+
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return jsonify({"error": "bad_request", "message": "Field 'reasoning' must be a non-empty string."}), 400
+
+    entries = audit.entries_for(content_id.strip())
+    if not entries:
+        return jsonify({
+            "error": "not_found",
+            "message": f"No submission found with content_id '{content_id}'.",
+        }), 404
+
+    creator_id = entries[0].get("creator_id", "unknown")
+    appeal_entry = audit.log_appeal(
+        content_id=content_id.strip(),
+        creator_id=creator_id,
+        reasoning=reasoning.strip(),
+    )
+
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /appeal isn't built yet — see the TODO in app.py.",
-        "you_sent": payload,
-    }), 501
+        "ok": True,
+        "content_id": content_id.strip(),
+        "status": appeal_entry.get("status", "under_review"),
+        "message": "Your appeal has been received. Your submission status is now under review.",
+    }), 200
 
 
 # ── Already works ─────────────────────────────────────────────────────────────

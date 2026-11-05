@@ -92,9 +92,14 @@ AI_THRESHOLD = 0.70
 # an hour, and a script sending a thousand variations to map your thresholds.
 # Your README has to say why your numbers and not others.
 
-RATE_LIMITING_ENABLED = os.getenv("AI201_RATE_LIMITS", "0") == "1"
+RATE_LIMITING_ENABLED = True
 
+# 10/min is plenty for a human iteratively revising drafts (rarely >2-3/min),
+# but immediately halts automated scripts attempting high-speed threshold sweeps.
 RATE_LIMIT_PER_MINUTE = 10
+
+# 200/day offers comfortable headroom for heavy legitimate drafting or classroom use,
+# while preventing long-running scrapers from probing the model all day.
 RATE_LIMIT_PER_DAY = 200
 
 # Flask-Limiter warns loudly without this. In-memory is right for one laptop

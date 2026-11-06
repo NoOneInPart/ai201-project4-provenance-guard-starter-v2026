@@ -191,3 +191,5 @@
 {"timestamp": "2026-11-06T20:19:23+00:00", "content_id": "14f4b01c-8293-4a87-b75c-5d53333345fe", "creator_id": "appeal_t3_u3", "event": "appeal", "status": "under_review", "reasoning": "Trial 3 appeal requesting review."}
 {"timestamp": "2026-11-06T20:19:23+00:00", "content_id": "b0c7e5d3-d72d-4127-8e6a-ee6e092135f3", "creator_id": "appeal_t3_u4", "event": "appeal", "status": "under_review", "reasoning": "Trial 3 appeal requesting review."}
 {"timestamp": "2026-11-06T20:19:23+00:00", "content_id": "8ea58578-8661-4ec5-9b28-914f55be9a1f", "creator_id": "appeal_t3_u5", "event": "appeal", "status": "under_review", "reasoning": "Trial 3 appeal requesting review."}
+{"timestamp": "2026-11-06T21:27:06+00:00", "creator_id": "test_short", "event": "rejected", "status": "rejected", "reason": "text_too_short"}
+{"timestamp": "2026-11-06T21:27:06+00:00", "creator_id": "test_huge", "event": "rejected", "status": "rejected", "reason": "text_too_large"}

@@ -556,19 +556,58 @@ The student chose clean, standard words and simple sentence structures to avoid 
 
 **Diagnoses**
 
-<!-- For each miss AND each broken attack: the stage and the mechanism.
+### Criteria Summary
+- **Criterion 1 (False Positive Rate):** **MISSED** (Target $\le 10\%$; Trials produced 20%, 20%, 20%).
+- **Criterion 2 (Score Separation):** **MISSED** (Target $\ge 0.40$; Trials produced 0.1444, 0.1444, 0.1444).
+- **Criterion 3 (Label Coverage):** **MISSED** (Target all 3 labels; all 3 trials produced only `"unsure"`).
+- **Criterion 4 (Malformed Input Rejection):** **MISSED** (Target 100% 4xx; Trials produced 75%, 75%, 75%).
+- **Criterion 5 (Appeal Path Integrity):** **MET** (Target 100%; Trials produced 100%, 100%, 100%).
 
-     Your service has five stages: the route, signal one, signal two, the
-     combining rule, and the label mapping.
+---
 
-     Not a diagnosis:  "The evasion attacks got through."
-     A diagnosis:      "Four evasion inputs got through. All four had typos
-                        added to AI-generated text. My second signal measures
-                        word variety, and typos raise word variety — so it read
-                        them as more human. My combining rule weights that
-                        signal at 0.6, so it dragged the whole score down."
+### Diagnoses by Criterion Miss
 
-     Look for a pattern. Five failures on one signal is one problem, not five. -->
+#### 1. Criterion 1 Miss (20% False Positive Rate on Own Writing)
+- **Stage:** Signal One (`detector.py::perplexity`) and Combining Rule (`scoring.py::combine_signals`).
+- **Mechanism:** Two authentic human samples (Text 3 explaining Yahoo password breaches and Text 5 analyzing terms of service) discussed technical/legal topics using disciplined conditional logic ("If the privacy policy...", "Passwords are secure data..."). Because standard expository phrasing is statistically common in GPT-2 training data, Signal One assigned high AI predictability (`model_score: 0.6946` and `0.8149`). Blended at 60% with moderate style scores ($0.736$ and $0.718$), both exceeded the `0.70` threshold (`0.7112` and `0.7762`), causing false accusations on legitimate analytical writing.
+
+#### 2. Criterion 2 Miss (Score Separation Gap Collapsed to 0.1444)
+- **Stage:** Signal One (`detector.py`) and Signal Two (`stylometry.py`).
+- **Mechanism:** The separation between clear human prose ($0.3468$) and clear AI prose ($0.4912$) shrank to $0.1444$ due to two symmetric signal distortions:
+  1. *Human compression:* Disciplined human explanations (XOR encryption, fair use) produced low sentence spread, elevating their `style_score` into the $0.20$–$0.28$ range.
+  2. *AI compression:* Synthetic paragraphs containing domain-specific jargon (machine learning cross-validation, microservices) surprised GPT-2, lowering `model_score` down to $0.2716$. Both distributions collapsed into the middle.
+
+#### 3. Criterion 3 Miss (Label Coverage Limited to "Unsure")
+- **Stage:** Label Mapping (`scoring.py::score_to_label`) and Threshold Boundaries (`config.py`).
+- **Mechanism:** The test inputs for label coverage scored $0.5670$ (AI testing text), $0.6231$ (dictionary definition of irony), and $0.3935$ (distributed version control). All three fell between `HUMAN_THRESHOLD = 0.35` and `AI_THRESHOLD = 0.70`. Because the combining rule averages two noisy signals, intermediate values dominate unless an input exhibits extreme anomalies across both signals simultaneously. Neither `"human"` nor `"ai"` was triggered in this scenario.
+
+#### 4. Criterion 4 Miss (50,000-Word Payload Accepted)
+- **Stage:** Route (`app.py::submit`).
+- **Mechanism:** The route perimeter validates missing keys and null values (`if not text or not str(text).strip()`), but lacks an upper bound check on string length or word count. When a 50,000-word payload was submitted, the route processed it completely. Tokenizing 50,000 identical repetitions of `"word"` saturated the perplexity model (`model_score: 0.9975`) and stylometry (`style_score: 1.0`), returning HTTP 200 with an AI verdict instead of a 400 or 413 client error.
+
+---
+
+### Diagnoses of Broken Attacks from the Attack Run
+
+#### 1. Attack MF02 Crash (Single-character input threw HTTP 500)
+- **Stage:** Route (`app.py::submit`).
+- **Mechanism:** A single character `"x"` passed route validation (`bool("x".strip()) == True`), but `detector.py::perplexity` requires at least two tokens to calculate loss (`if encoded["input_ids"].shape[1] < 2: raise ValueError(...)`). The uncaught `ValueError` escaped the route handler and escalated into an unhandled HTTP 500 Internal Server Error.
+
+#### 2. Evasion Attacks EV01–EV09 (Synthetic text classified as "unsure" or "human")
+- **Stage:** Signal Two (`stylometry.py`) and Combining Rule (`scoring.py::combine_signals`).
+- **Mechanism:** The evasion attacks applied cheap surface perturbations: injecting typos (EV01), splicing quotations (EV03), or fragmenting clauses (EV02, EV06). Stylometry measures text *as text* without semantic comprehension: typos inflated unique token counts (`type_token_ratio`), and fragmented sentences artificially boosted `sentence_length_spread`. This dragged `style_score` down into the $0.09$–$0.35$ range. Weighted at 40%, this pulled the combined score below `0.70`, letting synthetic text evade the AI label.
+
+#### 3. False Positive Attacks FP02, FP03, FP05, FP07 (Human text classified as "ai")
+- **Stage:** Signal One (`detector.py`) and Threshold Setting (`config.py`).
+- **Mechanism:** Non-native English speakers writing carefully (FP03) and authors of technical docs (FP05) or formal prose (FP02) deliberately select common, unambiguous words and uniform sentences to ensure clarity. GPT-2 finds ordinary vocabulary statistically easy to predict, scoring `model_score > 0.73`. Because `AI_THRESHOLD` was set at `0.70`, the system punished writers for grammatical discipline.
+
+---
+
+### The Pattern Across the Misses
+
+Two fundamental architectural patterns explain all the misses:
+1. **Perimeter Boundary Blindness:** The route (`app.py`) only checked whether text was present, completely ignoring input scale: ultra-short inputs (< 2 tokens) crashed the tokenizer into a 500 error, while ultra-long inputs (> 50,000 words) bypassed validation to consume unconstrained compute.
+2. **Predictability Conflated with Authorship:** Signal One relies entirely on statistical likelihood. Anyone writing with plain, disciplined grammar (academic explanations, privacy policies, ESL drafting) scores high on predictability and is penalized. Conversely, Signal Two relies entirely on surface mechanics (length variance, TTR), allowing attackers to bypass detection simply by introducing typos or uneven sentence fragments.
 
 
 
@@ -577,8 +616,13 @@ The student chose clean, standard words and simple sentence structures to avoid 
 ## The Improvement
 
 **What I changed:**
+Hardened perimeter input validation and error handling on `POST /submit` in [`app.py`](file:///c:/Users/t0mbu/Desktop/ai201/ai201-project4-provenance-guard-starter-v2026/app.py#L221-L235):
+1. **Lower-Bound Token Guard:** Added a check requiring at least 2 words (`len(text.strip().split()) < 2`) and wrapped signal calls in `try...except ValueError` to catch any tokenizer bounds errors from `detector.py`, logging rejection reason `"text_too_short"` / `"text_unscoreable"` and returning HTTP 400.
+2. **Upper-Bound Payload Guard:** Lowered the oversized payload threshold to reject any text $\ge 10,000$ words with HTTP 400, logging rejection reason `"text_too_large"`.
 
 **Which diagnosis pointed at it:**
+1. **Attack MF02 Crash Diagnosis:** Pointed directly at the unhandled `ValueError` when single-character or sub-2-token inputs bypassed route checks and crashed `detector.py::perplexity` with an HTTP 500 error.
+2. **Criterion 4 Miss Diagnosis:** Pointed at the lack of an effective upper bound check on submission length, allowing a 50,000-word payload to bypass route validation and return HTTP 200 OK instead of HTTP 400.
 
 ### Attack Run — After
 

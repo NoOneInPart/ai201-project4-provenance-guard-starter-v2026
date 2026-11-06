@@ -218,14 +218,24 @@ def submit():
         audit.log_rejection(creator_id="unknown", reason="missing_or_empty_creator_id")
         return jsonify({"error": "bad_request", "message": "Field 'creator_id' must be a non-empty string."}), 400
 
-    # Guard against oversized inputs (> 50,000 words)
-    if len(text.split()) > 50000:
+    # Guard against inputs that are too short to tokenize or score (< 2 words)
+    if len(text.strip().split()) < 2:
+        audit.log_rejection(creator_id=creator_id, reason="text_too_short")
+        return jsonify({"error": "bad_request", "message": "Text is too short to score — at least a few words are required."}), 400
+
+    # Guard against oversized inputs (>= 10,000 words)
+    if len(text.split()) >= 10000:
         audit.log_rejection(creator_id=creator_id, reason="text_too_large")
-        return jsonify({"error": "bad_request", "message": "Text payload exceeds maximum allowed size (50,000 words)."}), 400
+        return jsonify({"error": "bad_request", "message": "Text payload exceeds maximum allowed size (10,000 words)."}), 400
 
     content_id = str(uuid.uuid4())
-    model_score = detector.model_signal(text)
-    style_score = stylometry.style_signal(text)
+    try:
+        model_score = detector.model_signal(text)
+        style_score = stylometry.style_signal(text)
+    except ValueError as exc:
+        audit.log_rejection(creator_id=creator_id, reason="text_unscoreable")
+        return jsonify({"error": "bad_request", "message": str(exc)}), 400
+
     combined_score = scoring.combine_signals(model_score, style_score)
 
     # Determine guess, human-readable label, and confidence
